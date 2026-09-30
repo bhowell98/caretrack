@@ -5,6 +5,11 @@ import com.caretrack.security.CurrentUser;
 import com.caretrack.service.CareService;
 import com.caretrack.web.dto.ApiDtos.AppointmentRequest;
 import com.caretrack.web.dto.ApiDtos.AppointmentResponse;
+import com.caretrack.web.dto.ApiDtos.AuditEventResponse;
+import com.caretrack.web.dto.ApiDtos.BehaviorEventRequest;
+import com.caretrack.web.dto.ApiDtos.BehaviorEventResponse;
+import com.caretrack.web.dto.ApiDtos.BehaviorRequest;
+import com.caretrack.web.dto.ApiDtos.BehaviorResponse;
 import com.caretrack.web.dto.ApiDtos.BowelRequest;
 import com.caretrack.web.dto.ApiDtos.BowelResponse;
 import com.caretrack.web.dto.ApiDtos.ChildRequest;
@@ -12,8 +17,11 @@ import com.caretrack.web.dto.ApiDtos.ChildResponse;
 import com.caretrack.web.dto.ApiDtos.DashboardResponse;
 import com.caretrack.web.dto.ApiDtos.DoseRequest;
 import com.caretrack.web.dto.ApiDtos.DoseResponse;
+import com.caretrack.web.dto.ApiDtos.LogEntryResponse;
 import com.caretrack.web.dto.ApiDtos.MedicationRequest;
 import com.caretrack.web.dto.ApiDtos.MedicationResponse;
+import com.caretrack.web.dto.ApiDtos.ShareRequest;
+import com.caretrack.web.dto.ApiDtos.ShareResponse;
 import com.caretrack.web.dto.ApiDtos.SleepRequest;
 import com.caretrack.web.dto.ApiDtos.SleepResponse;
 import jakarta.validation.Valid;
@@ -25,9 +33,11 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.time.Instant;
 import java.util.List;
 
 @RestController
@@ -58,9 +68,43 @@ public class CareController {
         return careService.updateChild(user(), childId, request);
     }
 
+    @GetMapping("/{childId}/shares")
+    public List<ShareResponse> shares(@PathVariable Long childId) {
+        return careService.listShares(user(), childId);
+    }
+
+    @PostMapping("/{childId}/shares")
+    @ResponseStatus(HttpStatus.CREATED)
+    public ShareResponse inviteShare(@PathVariable Long childId, @Valid @RequestBody ShareRequest request) {
+        return careService.inviteShare(user(), childId, request);
+    }
+
+    @DeleteMapping("/{childId}/shares/{shareId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void removeShare(@PathVariable Long childId, @PathVariable Long shareId) {
+        careService.removeShare(user(), childId, shareId);
+    }
+
+    @PostMapping("/{childId}/leave")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void leaveShare(@PathVariable Long childId) {
+        careService.leaveShare(user(), childId);
+    }
+
     @GetMapping("/{childId}/dashboard")
     public DashboardResponse dashboard(@PathVariable Long childId) {
         return careService.dashboard(user(), childId);
+    }
+
+    @GetMapping("/{childId}/logs")
+    public List<LogEntryResponse> logs(
+            @PathVariable Long childId,
+            @RequestParam(required = false) Instant from,
+            @RequestParam(required = false) Instant to,
+            @RequestParam(required = false) String q,
+            @RequestParam(required = false) String types
+    ) {
+        return careService.listLogs(user(), childId, from, to, q, types);
     }
 
     @GetMapping("/{childId}/sleep")
@@ -141,6 +185,64 @@ public class CareController {
         careService.deleteMedication(user(), childId, medicationId);
     }
 
+    @GetMapping("/{childId}/behaviors")
+    public List<BehaviorResponse> behaviors(@PathVariable Long childId) {
+        return careService.listBehaviors(user(), childId);
+    }
+
+    @PostMapping("/{childId}/behaviors")
+    @ResponseStatus(HttpStatus.CREATED)
+    public BehaviorResponse createBehavior(
+            @PathVariable Long childId,
+            @Valid @RequestBody BehaviorRequest request
+    ) {
+        return careService.createBehavior(user(), childId, request);
+    }
+
+    @PutMapping("/{childId}/behaviors/{behaviorId}")
+    public BehaviorResponse updateBehavior(
+            @PathVariable Long childId,
+            @PathVariable Long behaviorId,
+            @Valid @RequestBody BehaviorRequest request
+    ) {
+        return careService.updateBehavior(user(), childId, behaviorId, request);
+    }
+
+    @DeleteMapping("/{childId}/behaviors/{behaviorId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteBehavior(@PathVariable Long childId, @PathVariable Long behaviorId) {
+        careService.deleteBehavior(user(), childId, behaviorId);
+    }
+
+    @GetMapping("/{childId}/behavior-events")
+    public List<BehaviorEventResponse> behaviorEvents(@PathVariable Long childId) {
+        return careService.listBehaviorEvents(user(), childId);
+    }
+
+    @PostMapping("/{childId}/behavior-events")
+    @ResponseStatus(HttpStatus.CREATED)
+    public BehaviorEventResponse createBehaviorEvent(
+            @PathVariable Long childId,
+            @Valid @RequestBody BehaviorEventRequest request
+    ) {
+        return careService.createBehaviorEvent(user(), childId, request);
+    }
+
+    @PutMapping("/{childId}/behavior-events/{eventId}")
+    public BehaviorEventResponse updateBehaviorEvent(
+            @PathVariable Long childId,
+            @PathVariable Long eventId,
+            @Valid @RequestBody BehaviorEventRequest request
+    ) {
+        return careService.updateBehaviorEvent(user(), childId, eventId, request);
+    }
+
+    @DeleteMapping("/{childId}/behavior-events/{eventId}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteBehaviorEvent(@PathVariable Long childId, @PathVariable Long eventId) {
+        careService.deleteBehaviorEvent(user(), childId, eventId);
+    }
+
     @GetMapping("/{childId}/doses")
     public List<DoseResponse> doses(@PathVariable Long childId) {
         return careService.listDoses(user(), childId);
@@ -156,6 +258,24 @@ public class CareController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void deleteDose(@PathVariable Long childId, @PathVariable Long doseId) {
         careService.deleteDose(user(), childId, doseId);
+    }
+
+    @PutMapping("/{childId}/doses/{doseId}")
+    public DoseResponse updateDose(
+            @PathVariable Long childId,
+            @PathVariable Long doseId,
+            @Valid @RequestBody DoseRequest request
+    ) {
+        return careService.updateDose(user(), childId, doseId, request);
+    }
+
+    @GetMapping("/{childId}/history/{entryType}/{entryId}")
+    public List<AuditEventResponse> history(
+            @PathVariable Long childId,
+            @PathVariable String entryType,
+            @PathVariable Long entryId
+    ) {
+        return careService.history(user(), childId, entryType, entryId);
     }
 
     @GetMapping("/{childId}/appointments")

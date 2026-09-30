@@ -36,6 +36,9 @@ public class MedicationDose {
     @Column(length = 2000)
     private String notes;
 
+    @Column(nullable = false, columnDefinition = "boolean default false not null")
+    private boolean edited = false;
+
     public Long getId() {
         return id;
     }
@@ -78,5 +81,13 @@ public class MedicationDose {
 
     public void setNotes(String notes) {
         this.notes = notes;
+    }
+
+    public boolean isEdited() {
+        return edited;
+    }
+
+    public void setEdited(boolean edited) {
+        this.edited = edited;
     }
 }

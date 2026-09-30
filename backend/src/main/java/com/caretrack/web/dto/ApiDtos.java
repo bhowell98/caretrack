@@ -1,6 +1,8 @@
 package com.caretrack.web.dto;
 
 import com.caretrack.domain.Appointment;
+import com.caretrack.domain.Behavior;
+import com.caretrack.domain.BehaviorEvent;
 import com.caretrack.domain.BowelMovement;
 import com.caretrack.domain.Child;
 import com.caretrack.domain.Medication;
@@ -43,10 +45,28 @@ public final class ApiDtos {
     ) {
     }
 
-    public record ChildResponse(Long id, String name, LocalDate dateOfBirth, String notes) {
+    public record ChildResponse(
+            Long id,
+            String name,
+            LocalDate dateOfBirth,
+            String notes,
+            String role,
+            String ownerName
+    ) {
         public static ChildResponse from(Child child) {
-            return new ChildResponse(child.getId(), child.getName(), child.getDateOfBirth(), child.getNotes());
+            return from(child, "OWNER");
         }
+
+        public static ChildResponse from(Child child, String role) {
+            String ownerName = child.getCaregiver() == null ? null : child.getCaregiver().getDisplayName();
+            return new ChildResponse(child.getId(), child.getName(), child.getDateOfBirth(), child.getNotes(), role, ownerName);
+        }
+    }
+
+    public record ShareRequest(@Email @NotBlank String email) {
+    }
+
+    public record ShareResponse(Long id, Long userId, String email, String displayName, String role) {
     }
 
     public record SleepRequest(
@@ -64,7 +84,8 @@ public final class ApiDtos {
             Instant endedAt,
             SleepInterval.Quality quality,
             Integer nightWakings,
-            String notes
+            String notes,
+            boolean edited
     ) {
         public static SleepResponse from(SleepInterval sleep) {
             return new SleepResponse(
@@ -73,7 +94,8 @@ public final class ApiDtos {
                     sleep.getEndedAt(),
                     sleep.getQuality(),
                     sleep.getNightWakings(),
-                    sleep.getNotes()
+                    sleep.getNotes(),
+                    sleep.isEdited()
             );
         }
     }
@@ -85,13 +107,14 @@ public final class ApiDtos {
     ) {
     }
 
-    public record BowelResponse(Long id, Instant occurredAt, Integer bristolType, String notes) {
+    public record BowelResponse(Long id, Instant occurredAt, Integer bristolType, String notes, boolean edited) {
         public static BowelResponse from(BowelMovement movement) {
             return new BowelResponse(
                     movement.getId(),
                     movement.getOccurredAt(),
                     movement.getBristolType(),
-                    movement.getNotes()
+                    movement.getNotes(),
+                    movement.isEdited()
             );
         }
     }
@@ -100,7 +123,10 @@ public final class ApiDtos {
             @NotBlank String name,
             String dosageInstructions,
             String scheduleNotes,
-            Boolean active
+            String buttonLabel,
+            String buttonColor,
+            Boolean active,
+            Boolean promptForDosage
     ) {
     }
 
@@ -109,7 +135,10 @@ public final class ApiDtos {
             String name,
             String dosageInstructions,
             String scheduleNotes,
-            boolean active
+            String buttonLabel,
+            String buttonColor,
+            boolean active,
+            boolean promptForDosage
     ) {
         public static MedicationResponse from(Medication medication) {
             return new MedicationResponse(
@@ -117,7 +146,10 @@ public final class ApiDtos {
                     medication.getName(),
                     medication.getDosageInstructions(),
                     medication.getScheduleNotes(),
-                    medication.isActive()
+                    medication.getButtonLabel(),
+                    medication.getButtonColor(),
+                    medication.isActive(),
+                    medication.isPromptForDosage()
             );
         }
     }
@@ -136,7 +168,8 @@ public final class ApiDtos {
             String medicationName,
             Instant givenAt,
             String amountGiven,
-            String notes
+            String notes,
+            boolean edited
     ) {
         public static DoseResponse from(MedicationDose dose) {
             return new DoseResponse(
@@ -145,7 +178,8 @@ public final class ApiDtos {
                     dose.getMedication().getName(),
                     dose.getGivenAt(),
                     dose.getAmountGiven(),
-                    dose.getNotes()
+                    dose.getNotes(),
+                    dose.isEdited()
             );
         }
     }
@@ -167,7 +201,8 @@ public final class ApiDtos {
             Instant endsAt,
             String provider,
             String location,
-            String notes
+            String notes,
+            boolean edited
     ) {
         public static AppointmentResponse from(Appointment appointment) {
             return new AppointmentResponse(
@@ -177,9 +212,83 @@ public final class ApiDtos {
                     appointment.getEndsAt(),
                     appointment.getProvider(),
                     appointment.getLocation(),
-                    appointment.getNotes()
+                    appointment.getNotes(),
+                    appointment.isEdited()
             );
         }
+    }
+
+    public record BehaviorRequest(
+            @NotBlank String name,
+            String description,
+            String buttonLabel,
+            String buttonColor,
+            Boolean active
+    ) {
+    }
+
+    public record BehaviorResponse(
+            Long id,
+            String name,
+            String description,
+            String buttonLabel,
+            String buttonColor,
+            boolean active
+    ) {
+        public static BehaviorResponse from(Behavior behavior) {
+            return new BehaviorResponse(
+                    behavior.getId(),
+                    behavior.getName(),
+                    behavior.getDescription(),
+                    behavior.getButtonLabel(),
+                    behavior.getButtonColor(),
+                    behavior.isActive()
+            );
+        }
+    }
+
+    public record BehaviorEventRequest(
+            @NotNull Long behaviorId,
+            @NotNull Instant occurredAt,
+            @Min(1) @Max(5) Integer intensity,
+            String notes
+    ) {
+    }
+
+    public record BehaviorEventResponse(
+            Long id,
+            Long behaviorId,
+            String behaviorName,
+            Instant occurredAt,
+            Integer intensity,
+            String notes,
+            boolean edited
+    ) {
+        public static BehaviorEventResponse from(BehaviorEvent event) {
+            return new BehaviorEventResponse(
+                    event.getId(),
+                    event.getBehavior().getId(),
+                    event.getBehavior().getName(),
+                    event.getOccurredAt(),
+                    event.getIntensity(),
+                    event.getNotes(),
+                    event.isEdited()
+            );
+        }
+    }
+
+    public record FieldChange(String field, String from, String to) {
+    }
+
+    public record AuditEventResponse(
+            Long id,
+            String entryType,
+            Long entryId,
+            String action,
+            Instant changedAt,
+            String actorName,
+            java.util.List<FieldChange> changes
+    ) {
     }
 
     public record DashboardResponse(
@@ -187,7 +296,18 @@ public final class ApiDtos {
             SleepResponse latestSleep,
             BowelResponse latestBowel,
             DoseResponse latestDose,
+            BehaviorEventResponse latestBehavior,
             AppointmentResponse nextAppointment
+    ) {
+    }
+
+    public record LogEntryResponse(
+            String type,
+            Long id,
+            Instant at,
+            String title,
+            String detail,
+            boolean edited
     ) {
     }
 }

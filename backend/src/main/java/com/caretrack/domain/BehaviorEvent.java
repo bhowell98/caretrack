@@ -13,8 +13,8 @@ import jakarta.persistence.Table;
 import java.time.Instant;
 
 @Entity
-@Table(name = "appointments")
-public class Appointment {
+@Table(name = "behavior_events")
+public class BehaviorEvent {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -24,17 +24,14 @@ public class Appointment {
     @JoinColumn(name = "child_id")
     private Child child;
 
-    @Column(nullable = false)
-    private String title;
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "behavior_id")
+    private Behavior behavior;
 
     @Column(nullable = false)
-    private Instant startsAt;
+    private Instant occurredAt;
 
-    private Instant endsAt;
-
-    private String provider;
-
-    private String location;
+    private Integer intensity;
 
     @Column(length = 2000)
     private String notes;
@@ -54,44 +51,28 @@ public class Appointment {
         this.child = child;
     }
 
-    public String getTitle() {
-        return title;
+    public Behavior getBehavior() {
+        return behavior;
     }
 
-    public void setTitle(String title) {
-        this.title = title;
+    public void setBehavior(Behavior behavior) {
+        this.behavior = behavior;
     }
 
-    public Instant getStartsAt() {
-        return startsAt;
+    public Instant getOccurredAt() {
+        return occurredAt;
     }
 
-    public void setStartsAt(Instant startsAt) {
-        this.startsAt = startsAt;
+    public void setOccurredAt(Instant occurredAt) {
+        this.occurredAt = occurredAt;
     }
 
-    public Instant getEndsAt() {
-        return endsAt;
+    public Integer getIntensity() {
+        return intensity;
     }
 
-    public void setEndsAt(Instant endsAt) {
-        this.endsAt = endsAt;
-    }
-
-    public String getProvider() {
-        return provider;
-    }
-
-    public void setProvider(String provider) {
-        this.provider = provider;
-    }
-
-    public String getLocation() {
-        return location;
-    }
-
-    public void setLocation(String location) {
-        this.location = location;
+    public void setIntensity(Integer intensity) {
+        this.intensity = intensity;
     }
 
     public String getNotes() {

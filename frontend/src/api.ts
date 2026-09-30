@@ -4,11 +4,23 @@ export type User = {
   displayName: string
 }
 
+export type ChildRole = 'OWNER' | 'SHARED'
+
 export type Child = {
   id: number
   name: string
   dateOfBirth: string | null
   notes: string | null
+  role: ChildRole
+  ownerName: string | null
+}
+
+export type ChildShare = {
+  id: number | null
+  userId: number
+  email: string
+  displayName: string
+  role: ChildRole
 }
 
 export type SleepQuality = 'UNKNOWN' | 'RESTLESS' | 'FAIR' | 'GOOD'
@@ -20,6 +32,7 @@ export type SleepInterval = {
   quality: SleepQuality
   nightWakings: number | null
   notes: string | null
+  edited: boolean
 }
 
 export type BowelMovement = {
@@ -27,6 +40,7 @@ export type BowelMovement = {
   occurredAt: string
   bristolType: number | null
   notes: string | null
+  edited: boolean
 }
 
 export type Medication = {
@@ -34,7 +48,10 @@ export type Medication = {
   name: string
   dosageInstructions: string | null
   scheduleNotes: string | null
+  buttonLabel: string | null
+  buttonColor: string | null
   active: boolean
+  promptForDosage: boolean
 }
 
 export type MedicationDose = {
@@ -44,6 +61,7 @@ export type MedicationDose = {
   givenAt: string
   amountGiven: string | null
   notes: string | null
+  edited: boolean
 }
 
 export type Appointment = {
@@ -54,6 +72,44 @@ export type Appointment = {
   provider: string | null
   location: string | null
   notes: string | null
+  edited: boolean
+}
+
+export type Behavior = {
+  id: number
+  name: string
+  description: string | null
+  buttonLabel: string | null
+  buttonColor: string | null
+  active: boolean
+}
+
+export type BehaviorEvent = {
+  id: number
+  behaviorId: number
+  behaviorName: string
+  occurredAt: string
+  intensity: number | null
+  notes: string | null
+  edited: boolean
+}
+
+export type AuditEntryType = 'SLEEP' | 'BOWEL' | 'DOSE' | 'APPOINTMENT' | 'BEHAVIOR'
+
+export type FieldChange = {
+  field: string
+  from: string
+  to: string
+}
+
+export type AuditEvent = {
+  id: number
+  entryType: AuditEntryType
+  entryId: number
+  action: 'CREATED' | 'UPDATED' | 'DELETED'
+  changedAt: string
+  actorName: string
+  changes: FieldChange[]
 }
 
 export type Dashboard = {
@@ -61,7 +117,19 @@ export type Dashboard = {
   latestSleep: SleepInterval | null
   latestBowel: BowelMovement | null
   latestDose: MedicationDose | null
+  latestBehavior: BehaviorEvent | null
   nextAppointment: Appointment | null
+}
+
+export type LogType = 'SLEEP' | 'BOWEL' | 'DOSE' | 'BEHAVIOR' | 'APPOINTMENT'
+
+export type LogEntry = {
+  type: LogType
+  id: number
+  at: string
+  title: string
+  detail: string
+  edited: boolean
 }
 
 const TOKEN_KEY = 'caretrack.token'
@@ -112,11 +180,34 @@ export const api = {
     request<Child>('/api/children', { method: 'POST', body: JSON.stringify(body) }),
   updateChild: (id: number, body: { name: string; dateOfBirth?: string; notes?: string }) =>
     request<Child>(`/api/children/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  shares: (childId: number) => request<ChildShare[]>(`/api/children/${childId}/shares`),
+  inviteShare: (childId: number, email: string) =>
+    request<ChildShare>(`/api/children/${childId}/shares`, {
+      method: 'POST',
+      body: JSON.stringify({ email }),
+    }),
+  removeShare: (childId: number, shareId: number) =>
+    request<void>(`/api/children/${childId}/shares/${shareId}`, { method: 'DELETE' }),
+  leaveShare: (childId: number) => request<void>(`/api/children/${childId}/leave`, { method: 'POST' }),
   dashboard: (childId: number) => request<Dashboard>(`/api/children/${childId}/dashboard`),
+  logs: (childId: number, params: { from?: string; to?: string; q?: string; types?: string }) => {
+    const search = new URLSearchParams()
+    if (params.from) search.set('from', params.from)
+    if (params.to) search.set('to', params.to)
+    if (params.q) search.set('q', params.q)
+    if (params.types) search.set('types', params.types)
+    const query = search.toString()
+    return request<LogEntry[]>(`/api/children/${childId}/logs${query ? `?${query}` : ''}`)
+  },
   sleep: (childId: number) => request<SleepInterval[]>(`/api/children/${childId}/sleep`),
   createSleep: (childId: number, body: object) =>
     request<SleepInterval>(`/api/children/${childId}/sleep`, {
       method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  updateSleep: (childId: number, id: number, body: object) =>
+    request<SleepInterval>(`/api/children/${childId}/sleep/${id}`, {
+      method: 'PUT',
       body: JSON.stringify(body),
     }),
   deleteSleep: (childId: number, id: number) =>
@@ -125,6 +216,11 @@ export const api = {
   createBowel: (childId: number, body: object) =>
     request<BowelMovement>(`/api/children/${childId}/bowel`, {
       method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  updateBowel: (childId: number, id: number, body: object) =>
+    request<BowelMovement>(`/api/children/${childId}/bowel/${id}`, {
+      method: 'PUT',
       body: JSON.stringify(body),
     }),
   deleteBowel: (childId: number, id: number) =>
@@ -148,6 +244,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  updateDose: (childId: number, id: number, body: object) =>
+    request<MedicationDose>(`/api/children/${childId}/doses/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
   deleteDose: (childId: number, id: number) =>
     request<void>(`/api/children/${childId}/doses/${id}`, { method: 'DELETE' }),
   appointments: (childId: number) =>
@@ -157,8 +258,42 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+  updateAppointment: (childId: number, id: number, body: object) =>
+    request<Appointment>(`/api/children/${childId}/appointments/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
   deleteAppointment: (childId: number, id: number) =>
     request<void>(`/api/children/${childId}/appointments/${id}`, { method: 'DELETE' }),
+  history: (childId: number, entryType: AuditEntryType, entryId: number) =>
+    request<AuditEvent[]>(`/api/children/${childId}/history/${entryType}/${entryId}`),
+  behaviors: (childId: number) => request<Behavior[]>(`/api/children/${childId}/behaviors`),
+  createBehavior: (childId: number, body: object) =>
+    request<Behavior>(`/api/children/${childId}/behaviors`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  updateBehavior: (childId: number, id: number, body: object) =>
+    request<Behavior>(`/api/children/${childId}/behaviors/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+  deleteBehavior: (childId: number, id: number) =>
+    request<void>(`/api/children/${childId}/behaviors/${id}`, { method: 'DELETE' }),
+  behaviorEvents: (childId: number) =>
+    request<BehaviorEvent[]>(`/api/children/${childId}/behavior-events`),
+  createBehaviorEvent: (childId: number, body: object) =>
+    request<BehaviorEvent>(`/api/children/${childId}/behavior-events`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  updateBehaviorEvent: (childId: number, id: number, body: object) =>
+    request<BehaviorEvent>(`/api/children/${childId}/behavior-events/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+  deleteBehaviorEvent: (childId: number, id: number) =>
+    request<void>(`/api/children/${childId}/behavior-events/${id}`, { method: 'DELETE' }),
 }
 
 export function toLocalInput(iso?: string | null) {
@@ -169,6 +304,18 @@ export function toLocalInput(iso?: string | null) {
 
 export function fromLocalInput(value: string) {
   return new Date(value).toISOString()
+}
+
+export function nowIso() {
+  return new Date().toISOString()
+}
+
+export function medicationButtonLabel(medication: Medication) {
+  return medication.buttonLabel?.trim() || medication.name
+}
+
+export function behaviorButtonLabel(behavior: Behavior) {
+  return behavior.buttonLabel?.trim() || behavior.name
 }
 
 export function formatWhen(iso?: string | null) {

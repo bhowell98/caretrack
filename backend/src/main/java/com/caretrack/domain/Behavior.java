@@ -11,8 +11,8 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 
 @Entity
-@Table(name = "medications")
-public class Medication {
+@Table(name = "behaviors")
+public class Behavior {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -25,9 +25,8 @@ public class Medication {
     @Column(nullable = false)
     private String name;
 
-    private String dosageInstructions;
-
-    private String scheduleNotes;
+    @Column(length = 2000)
+    private String description;
 
     private String buttonLabel;
 
@@ -36,9 +35,6 @@ public class Medication {
 
     @Column(nullable = false)
     private boolean active = true;
-
-    @Column(nullable = false, columnDefinition = "boolean default false not null")
-    private boolean promptForDosage = false;
 
     public Long getId() {
         return id;
@@ -60,20 +56,12 @@ public class Medication {
         this.name = name;
     }
 
-    public String getDosageInstructions() {
-        return dosageInstructions;
+    public String getDescription() {
+        return description;
     }
 
-    public void setDosageInstructions(String dosageInstructions) {
-        this.dosageInstructions = dosageInstructions;
-    }
-
-    public String getScheduleNotes() {
-        return scheduleNotes;
-    }
-
-    public void setScheduleNotes(String scheduleNotes) {
-        this.scheduleNotes = scheduleNotes;
+    public void setDescription(String description) {
+        this.description = description;
     }
 
     public String getButtonLabel() {
@@ -98,13 +86,5 @@ public class Medication {
 
     public void setActive(boolean active) {
         this.active = active;
-    }
-
-    public boolean isPromptForDosage() {
-        return promptForDosage;
-    }
-
-    public void setPromptForDosage(boolean promptForDosage) {
-        this.promptForDosage = promptForDosage;
     }
 }
