@@ -1,0 +1,6 @@
+# Root
+.DS_Store
+*.log
+
+# Backend H2 files if created at repo root
+backend/data/
