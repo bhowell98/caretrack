@@ -211,6 +211,64 @@ function NeedChild({ children }: { children: ReactNode }) {
 
 const MED_BUTTON_COLORS = ['#3d6b5a', '#4a6fa5', '#7a5c9e', '#c46b4a', '#8b5a3c', '#2d6a4f']
 
+type QuickButtonDraft = {
+  kind: 'med' | 'behavior'
+  id: number | null
+  name: string
+  buttonLabel: string
+  buttonColor: string
+  active: boolean
+  dosage: string
+  schedule: string
+  promptForDosage: boolean
+  description: string
+}
+
+function emptyButtonDraft(kind: 'med' | 'behavior'): QuickButtonDraft {
+  return {
+    kind,
+    id: null,
+    name: '',
+    buttonLabel: '',
+    buttonColor: MED_BUTTON_COLORS[0],
+    active: true,
+    dosage: '',
+    schedule: '',
+    promptForDosage: false,
+    description: '',
+  }
+}
+
+function draftFromMedication(med: Medication): QuickButtonDraft {
+  return {
+    kind: 'med',
+    id: med.id,
+    name: med.name,
+    buttonLabel: med.buttonLabel ?? '',
+    buttonColor: med.buttonColor || MED_BUTTON_COLORS[0],
+    active: med.active,
+    dosage: med.dosageInstructions ?? '',
+    schedule: med.scheduleNotes ?? '',
+    promptForDosage: Boolean(med.promptForDosage),
+    description: '',
+  }
+}
+
+function draftFromBehavior(behavior: Behavior): QuickButtonDraft {
+  return {
+    kind: 'behavior',
+    id: behavior.id,
+    name: behavior.name,
+    buttonLabel: behavior.buttonLabel ?? '',
+    buttonColor: behavior.buttonColor || MED_BUTTON_COLORS[0],
+    active: behavior.active,
+    dosage: '',
+    schedule: '',
+    promptForDosage: false,
+    description: behavior.description ?? '',
+  }
+}
+
 function ColorSwatches({
   value,
   onChange,
@@ -272,6 +330,8 @@ function QuickLogButtons({ onLogged, refreshToken = 0 }: { onLogged?: () => void
   const [bmPrompt, setBmPrompt] = useState(false)
   const [dosePrompt, setDosePrompt] = useState<Medication | null>(null)
   const [doseAmount, setDoseAmount] = useState('')
+  const [editingButtons, setEditingButtons] = useState(false)
+  const [buttonDraft, setButtonDraft] = useState<QuickButtonDraft | null>(null)
 
   async function reload() {
     if (!child) return
@@ -290,8 +350,9 @@ function QuickLogButtons({ onLogged, refreshToken = 0 }: { onLogged?: () => void
   }, [child, refreshToken])
 
   const currentSleep = sleeps.find((row) => !row.endedAt) ?? null
-  const activeMeds = meds.filter((med) => med.active)
-  const activeBehaviors = behaviors.filter((behavior) => behavior.active)
+  const shownMeds = editingButtons ? meds : meds.filter((med) => med.active)
+  const shownBehaviors = editingButtons ? behaviors : behaviors.filter((behavior) => behavior.active)
+  const builtInDisabled = Boolean(busy) || editingButtons
 
   async function run(key: string, action: () => Promise<unknown>, message: string) {
     if (!child) return
@@ -309,19 +370,107 @@ function QuickLogButtons({ onLogged, refreshToken = 0 }: { onLogged?: () => void
     }
   }
 
+  async function saveButtonDraft(event: FormEvent) {
+    event.preventDefault()
+    if (!child || !buttonDraft) return
+    setError('')
+    setBusy('button-edit')
+    try {
+      if (buttonDraft.kind === 'med') {
+        const body = {
+          name: buttonDraft.name,
+          dosageInstructions: buttonDraft.dosage,
+          scheduleNotes: buttonDraft.schedule,
+          buttonLabel: buttonDraft.buttonLabel,
+          buttonColor: buttonDraft.buttonColor,
+          active: buttonDraft.active,
+          promptForDosage: buttonDraft.promptForDosage,
+        }
+        if (buttonDraft.id === null) {
+          await api.createMedication(child.id, body)
+          setStatus('Medication button added')
+        } else {
+          await api.updateMedication(child.id, buttonDraft.id, body)
+          setStatus('Medication button saved')
+        }
+      } else {
+        const body = {
+          name: buttonDraft.name,
+          description: buttonDraft.description,
+          buttonLabel: buttonDraft.buttonLabel,
+          buttonColor: buttonDraft.buttonColor,
+          active: buttonDraft.active,
+        }
+        if (buttonDraft.id === null) {
+          await api.createBehavior(child.id, body)
+          setStatus('Behavior button added')
+        } else {
+          await api.updateBehavior(child.id, buttonDraft.id, body)
+          setStatus('Behavior button saved')
+        }
+      }
+      setButtonDraft(null)
+      await reload()
+      onLogged?.()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save button')
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  async function deleteButtonDraft() {
+    if (!child || !buttonDraft?.id) return
+    setError('')
+    setBusy('button-edit')
+    try {
+      if (buttonDraft.kind === 'med') {
+        await api.deleteMedication(child.id, buttonDraft.id)
+      } else {
+        await api.deleteBehavior(child.id, buttonDraft.id)
+      }
+      setButtonDraft(null)
+      setStatus('Button deleted')
+      await reload()
+      onLogged?.()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not delete button')
+    } finally {
+      setBusy(null)
+    }
+  }
+
   return (
     <section className="card">
-      <h2>Quick log</h2>
+      <div className="section-heading">
+        <h2>Quick log</h2>
+        <button
+          type="button"
+          className={editingButtons ? undefined : 'secondary'}
+          aria-pressed={editingButtons}
+          onClick={() => {
+            setEditingButtons((value) => !value)
+            setButtonDraft(null)
+            setBmPrompt(false)
+            setDosePrompt(null)
+            setStatus('')
+          }}
+        >
+          {editingButtons ? 'Done' : 'Edit buttons'}
+        </button>
+      </div>
       <p className="muted">
-        {currentSleep
-          ? `Sleeping since ${formatWhen(currentSleep.startedAt)}.`
-          : 'Tap Sleep, Awake, BM, or a medication or behavior button to log now.'}
+        {editingButtons
+          ? 'Tap a medication or behavior button to change its name, label, or color. Sleep, Awake, and BM stay as they are.'
+          : currentSleep
+            ? `Sleeping since ${formatWhen(currentSleep.startedAt)}.`
+            : 'Tap Sleep, Awake, BM, or a medication or behavior button to log now.'}
       </p>
       <div className="quick-grid">
         <button
           type="button"
           className="quick-btn sleep"
-          disabled={Boolean(busy) || Boolean(currentSleep)}
+          disabled={builtInDisabled || Boolean(currentSleep)}
           onClick={() =>
             run(
               'sleep',
@@ -342,7 +491,7 @@ function QuickLogButtons({ onLogged, refreshToken = 0 }: { onLogged?: () => void
         <button
           type="button"
           className="quick-btn awake"
-          disabled={Boolean(busy) || !currentSleep}
+          disabled={builtInDisabled || !currentSleep}
           onClick={() =>
             run(
               'awake',
@@ -363,7 +512,7 @@ function QuickLogButtons({ onLogged, refreshToken = 0 }: { onLogged?: () => void
         <button
           type="button"
           className="quick-btn bowel"
-          disabled={Boolean(busy)}
+          disabled={builtInDisabled}
           aria-label="Bowel movement"
           onClick={() => {
             setError('')
@@ -372,14 +521,19 @@ function QuickLogButtons({ onLogged, refreshToken = 0 }: { onLogged?: () => void
         >
           BM
         </button>
-        {activeMeds.map((med) => (
+        {shownMeds.map((med) => (
           <button
             key={med.id}
             type="button"
-            className="quick-btn med"
+            className={`quick-btn med${editingButtons ? ' editing' : ''}${med.active ? '' : ' inactive'}`}
             style={{ background: med.buttonColor || undefined }}
-            disabled={Boolean(busy)}
+            disabled={Boolean(busy) && !editingButtons}
             onClick={() => {
+              if (editingButtons) {
+                setError('')
+                setButtonDraft(draftFromMedication(med))
+                return
+              }
               if (med.promptForDosage) {
                 setError('')
                 setDosePrompt(med)
@@ -402,15 +556,20 @@ function QuickLogButtons({ onLogged, refreshToken = 0 }: { onLogged?: () => void
             {medicationButtonLabel(med)}
           </button>
         ))}
-        {activeBehaviors.map((behavior) => (
+        {shownBehaviors.map((behavior) => (
           <button
             key={`behavior-${behavior.id}`}
             type="button"
-            className="quick-btn med"
+            className={`quick-btn med${editingButtons ? ' editing' : ''}${behavior.active ? '' : ' inactive'}`}
             style={{ background: behavior.buttonColor || undefined }}
-            disabled={Boolean(busy)}
-            onClick={() =>
-              run(
+            disabled={Boolean(busy) && !editingButtons}
+            onClick={() => {
+              if (editingButtons) {
+                setError('')
+                setButtonDraft(draftFromBehavior(behavior))
+                return
+              }
+              void run(
                 `behavior-${behavior.id}`,
                 () =>
                   api.createBehaviorEvent(child!.id, {
@@ -421,17 +580,129 @@ function QuickLogButtons({ onLogged, refreshToken = 0 }: { onLogged?: () => void
                   }),
                 `${behaviorButtonLabel(behavior)} logged`,
               )
-            }
+            }}
           >
             {behaviorButtonLabel(behavior)}
           </button>
         ))}
+        {editingButtons && (
+          <button
+            type="button"
+            className="quick-btn add"
+            onClick={() => {
+              setError('')
+              setButtonDraft(emptyButtonDraft('med'))
+            }}
+          >
+            + Add
+          </button>
+        )}
       </div>
-      {activeMeds.length === 0 && activeBehaviors.length === 0 && (
+      {!editingButtons && shownMeds.length === 0 && shownBehaviors.length === 0 && (
         <p className="muted">
-          Add one-tap buttons on the <NavLink to="/meds">Meds</NavLink> or <NavLink to="/behaviors">Behaviors</NavLink>{' '}
-          pages.
+          Add one-tap buttons with Edit buttons, or on the <NavLink to="/meds">Meds</NavLink> or{' '}
+          <NavLink to="/behaviors">Behaviors</NavLink> pages.
         </p>
+      )}
+      {buttonDraft && (
+        <div className="dialog-backdrop" role="presentation" onClick={() => setButtonDraft(null)}>
+          <form
+            className="dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="quick-button-title"
+            onClick={(event) => event.stopPropagation()}
+            onSubmit={saveButtonDraft}
+          >
+            <h3 id="quick-button-title">{buttonDraft.id === null ? 'Add button' : 'Edit button'}</h3>
+            {buttonDraft.id === null && (
+              <Field label="Button type">
+                <select
+                  value={buttonDraft.kind}
+                  onChange={(e) =>
+                    setButtonDraft({
+                      ...buttonDraft,
+                      kind: e.target.value === 'behavior' ? 'behavior' : 'med',
+                    })
+                  }
+                >
+                  <option value="med">Medication</option>
+                  <option value="behavior">Behavior</option>
+                </select>
+              </Field>
+            )}
+            <Field label={buttonDraft.kind === 'med' ? 'Medication name' : 'Behavior name'}>
+              <input
+                value={buttonDraft.name}
+                onChange={(e) => setButtonDraft({ ...buttonDraft, name: e.target.value })}
+                required
+                autoFocus
+              />
+            </Field>
+            <Field label="Button label (optional)">
+              <input
+                value={buttonDraft.buttonLabel}
+                onChange={(e) => setButtonDraft({ ...buttonDraft, buttonLabel: e.target.value })}
+                placeholder="Short label on the quick button"
+              />
+            </Field>
+            <Field label="Button color">
+              <ColorSwatches
+                value={buttonDraft.buttonColor}
+                onChange={(buttonColor) => setButtonDraft({ ...buttonDraft, buttonColor })}
+              />
+            </Field>
+            {buttonDraft.kind === 'med' ? (
+              <>
+                <Field label="Dose instructions">
+                  <input
+                    value={buttonDraft.dosage}
+                    onChange={(e) => setButtonDraft({ ...buttonDraft, dosage: e.target.value })}
+                    placeholder="e.g. 5 ml with food"
+                  />
+                </Field>
+                <Switch
+                  checked={buttonDraft.promptForDosage}
+                  onChange={(promptForDosage) => setButtonDraft({ ...buttonDraft, promptForDosage })}
+                  label="Prompt for dosage when logging"
+                />
+                <Field label="Schedule notes">
+                  <input
+                    value={buttonDraft.schedule}
+                    onChange={(e) => setButtonDraft({ ...buttonDraft, schedule: e.target.value })}
+                    placeholder="e.g. morning and bedtime"
+                  />
+                </Field>
+              </>
+            ) : (
+              <Field label="What it looks like">
+                <textarea
+                  value={buttonDraft.description}
+                  onChange={(e) => setButtonDraft({ ...buttonDraft, description: e.target.value })}
+                  rows={3}
+                />
+              </Field>
+            )}
+            <Switch
+              checked={buttonDraft.active}
+              onChange={(active) => setButtonDraft({ ...buttonDraft, active })}
+              label="Show on quick log"
+            />
+            <div className="row-actions">
+              <button type="submit" disabled={busy === 'button-edit'}>
+                Save button
+              </button>
+              <button type="button" className="secondary" onClick={() => setButtonDraft(null)}>
+                Cancel
+              </button>
+              {buttonDraft.id !== null && (
+                <button type="button" className="ghost" disabled={busy === 'button-edit'} onClick={() => void deleteButtonDraft()}>
+                  Delete
+                </button>
+              )}
+            </div>
+          </form>
+        </div>
       )}
       {bmPrompt && (
         <div
@@ -1288,7 +1559,7 @@ function MedsPage() {
                     </div>
                     <div className="row-actions">
                       <button type="button" onClick={() => startEdit(med)}>
-                        Customize
+                        Edit
                       </button>
                       <button
                         type="button"
@@ -1613,7 +1884,7 @@ function BehaviorsPage() {
                     </div>
                     <div className="row-actions">
                       <button type="button" onClick={() => startEdit(behavior)}>
-                        Customize
+                        Edit
                       </button>
                       <button
                         type="button"
