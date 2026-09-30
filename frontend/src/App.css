@@ -218,7 +218,14 @@ button.ghost {
 }
 
 .quick-btn.awake {
-  background: #c46b4a;
+  background: #6e2e1c;
+  color: #fff8f2;
+}
+
+.quick-btn.awake:disabled {
+  opacity: 1;
+  background: #d7c0b4;
+  color: #3a2218;
 }
 
 .quick-btn.bowel {
