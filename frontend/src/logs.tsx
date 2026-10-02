@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { api, formatWhen, type Child, type LogEntry, type LogType } from './api'
 import { EditedFlag, HistoryPanel } from './history'
@@ -151,17 +151,84 @@ function hourLabel(hour: number) {
   return new Date(2000, 0, 1, hour).toLocaleTimeString(undefined, { hour: 'numeric' })
 }
 
+function loadImage(url: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image()
+    image.onload = () => resolve(image)
+    image.onerror = () => reject(new Error('Could not render graph'))
+    image.src = url
+  })
+}
+
+async function graphSvgToPng(
+  svg: SVGSVGElement,
+  heading: string,
+  legend: { label: string; color: string; count: number }[],
+): Promise<Blob> {
+  const clone = svg.cloneNode(true) as SVGSVGElement
+  clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+  clone.querySelectorAll('line').forEach((line) => {
+    if ((line.getAttribute('stroke') || '').includes('var(')) {
+      line.setAttribute('stroke', '#ddd4c6')
+    }
+  })
+  clone.querySelectorAll('text').forEach((text) => {
+    text.setAttribute('fill', '#5c6b65')
+    text.setAttribute('font-size', '10')
+    text.setAttribute('font-family', 'system-ui, sans-serif')
+  })
+  const xml = new XMLSerializer().serializeToString(clone)
+  const url = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(xml)}`
+  const image = await loadImage(url)
+  const scale = 2
+  const pad = 20 * scale
+  const svgWidth = Math.max(svg.width.baseVal.value, 1)
+  const svgHeight = Math.max(svg.height.baseVal.value, 1)
+  const legendHeight = 36 * scale
+  const titleHeight = 28 * scale
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.max(svgWidth * scale, 640 * scale) + pad * 2
+  canvas.height = pad + titleHeight + svgHeight * scale + legendHeight + pad
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('Could not export graph')
+  ctx.fillStyle = '#fffaf3'
+  ctx.fillRect(0, 0, canvas.width, canvas.height)
+  ctx.fillStyle = '#24312c'
+  ctx.font = `600 ${16 * scale}px system-ui, sans-serif`
+  ctx.fillText(heading, pad, pad + 16 * scale)
+  ctx.drawImage(image, pad, pad + titleHeight, svgWidth * scale, svgHeight * scale)
+  ctx.font = `${12 * scale}px system-ui, sans-serif`
+  let x = pad
+  const y = pad + titleHeight + svgHeight * scale + 22 * scale
+  for (const item of legend) {
+    ctx.fillStyle = item.color
+    ctx.fillRect(x, y - 10 * scale, 10 * scale, 10 * scale)
+    ctx.fillStyle = '#24312c'
+    const label = `${item.label} (${item.count})`
+    ctx.fillText(label, x + 14 * scale, y)
+    x += ctx.measureText(label).width + 28 * scale
+  }
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('Could not export graph'))), 'image/png')
+  })
+}
+
 function EventGraph({
   from,
   to,
   entries,
   types,
+  childName,
 }: {
   from: string
   to: string
   entries: LogEntry[]
   types: LogType[]
+  childName: string
 }) {
+  const svgRef = useRef<SVGSVGElement>(null)
+  const [shareStatus, setShareStatus] = useState('')
+  const [shareError, setShareError] = useState('')
   const singleDay = from === to
   const [kind, setKind] = useState<'bars' | 'lines'>(() =>
     localStorage.getItem('caretrack.logsChart') === 'lines' ? 'lines' : 'bars',
@@ -241,6 +308,66 @@ function EventGraph({
     return singleDay ? index % 3 === 0 : buckets.length <= 14 || index % Math.ceil(buckets.length / 10) === 0
   }
 
+  const rangeLabel = from === to ? from : `${from} to ${to}`
+  const shareHeading = `${childName} · ${rangeLabel}`
+  const legendItems = visibleTypes.map((item) => ({
+    label: item.label,
+    color: TYPE_COLORS[item.type],
+    count: totals[item.type],
+  }))
+
+  async function pngBlob() {
+    const svg = svgRef.current
+    if (!svg) throw new Error('Graph is not ready')
+    return graphSvgToPng(svg, `${shareHeading} · ${kind === 'lines' ? 'line' : 'bar'} chart`, legendItems)
+  }
+
+  function fileName() {
+    return `caretrack-graph-${childName.replaceAll(/\s+/g, '-').toLowerCase()}-${from}-to-${to}.png`
+  }
+
+  function printGraph() {
+    setShareError('')
+    setShareStatus('Print dialog opened.')
+    document.body.classList.add('print-graph-only')
+    const cleanup = () => {
+      document.body.classList.remove('print-graph-only')
+      window.removeEventListener('afterprint', cleanup)
+    }
+    window.addEventListener('afterprint', cleanup)
+    window.print()
+  }
+
+  async function shareGraph() {
+    setShareError('')
+    setShareStatus('')
+    try {
+      const blob = await pngBlob()
+      const file = new File([blob], fileName(), { type: 'image/png' })
+      const text = `${shareHeading}\n${title}`
+      if (navigator.share && navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ title: shareHeading, text, files: [file] })
+        setShareStatus('Share sheet opened.')
+        return
+      }
+      if (navigator.share) {
+        await navigator.share({ title: shareHeading, text })
+        setShareStatus('Share sheet opened.')
+        return
+      }
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = fileName()
+      link.click()
+      URL.revokeObjectURL(url)
+      setShareStatus('Graph image downloaded.')
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') return
+      setShareError(err instanceof Error ? err.message : 'Could not share graph')
+    }
+  }
+
   if (entries.length === 0) {
     return (
       <section className="card">
@@ -251,10 +378,10 @@ function EventGraph({
   }
 
   return (
-    <section className="card">
+    <section className="card graph-print-target">
       <div className="section-heading">
         <h2>Activity graph</h2>
-        <div className="view-switch" role="group" aria-label="Chart type">
+        <div className="view-switch no-print" role="group" aria-label="Chart type">
           <button
             type="button"
             className={kind === 'bars' ? 'selected' : 'secondary'}
@@ -284,6 +411,7 @@ function EventGraph({
       </p>
       <div className="event-chart">
         <svg
+          ref={svgRef}
           role="img"
           aria-label={title}
           viewBox={`0 0 ${chartWidth} ${chartHeight + 36}`}
@@ -386,6 +514,16 @@ function EventGraph({
           </li>
         ))}
       </ul>
+      <div className="row-actions no-print">
+        <button type="button" className="secondary" onClick={() => void shareGraph()}>
+          Share graph
+        </button>
+        <button type="button" className="secondary" onClick={printGraph}>
+          Print graph
+        </button>
+      </div>
+      {shareError && <p className="error no-print">{shareError}</p>}
+      {shareStatus && !shareError && <p className="status no-print">{shareStatus}</p>}
     </section>
   )
 }
@@ -599,7 +737,7 @@ export function LogsPage() {
         </div>
       </section>
 
-      <EventGraph from={from} to={to} entries={entries} types={types} />
+      <EventGraph from={from} to={to} entries={entries} types={types} childName={child.name} />
 
       <p className="muted">
         {entries.length} {entries.length === 1 ? 'entry' : 'entries'}

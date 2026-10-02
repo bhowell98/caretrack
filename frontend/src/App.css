@@ -582,4 +582,16 @@ button.secondary {
     box-shadow: none;
     break-inside: avoid;
   }
+
+  body.print-graph-only header,
+  body.print-graph-only nav,
+  body.print-graph-only .logs-toolbar,
+  body.print-graph-only main > :not(.graph-print-target) {
+    display: none !important;
+  }
+
+  body.print-graph-only .graph-print-target {
+    box-shadow: none;
+    border: 0;
+  }
 }
