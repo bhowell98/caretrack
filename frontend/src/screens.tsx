@@ -436,6 +436,8 @@ function QuickLogButtons({ onLogged, refreshToken = 0 }: { onLogged?: () => void
         }
         return true
       })
+  const shownMeds = editingButtons ? meds : meds.filter((med) => med.active)
+  const shownBehaviors = editingButtons ? behaviors : behaviors.filter((behavior) => behavior.active)
   const builtInDisabled = Boolean(busy) || editingButtons
 
   async function run(key: string, action: () => Promise<unknown>, message: string) {
@@ -582,6 +584,7 @@ function QuickLogButtons({ onLogged, refreshToken = 0 }: { onLogged?: () => void
       <p className="muted">
         {editingButtons
           ? 'Drag a button or use the arrows to change order. Tap a medication or behavior button to edit it. Sleep, Awake, and BM stay built-in.'
+          ? 'Tap a medication or behavior button to change its name, label, or color. Sleep, Awake, and BM stay as they are.'
           : currentSleep
             ? `Sleeping since ${formatWhen(currentSleep.startedAt)}.`
             : 'Tap Sleep, Awake, BM, or a medication or behavior button to log now.'}
@@ -743,6 +746,61 @@ function QuickLogButtons({ onLogged, refreshToken = 0 }: { onLogged?: () => void
           return null
         })}
         {editingButtons && (
+        <button
+          type="button"
+          className="quick-btn sleep"
+          disabled={builtInDisabled || Boolean(currentSleep)}
+          onClick={() =>
+            run(
+              'sleep',
+              () =>
+                api.createSleep(child!.id, {
+                  startedAt: nowIso(),
+                  endedAt: null,
+                  quality: 'UNKNOWN',
+                  nightWakings: null,
+                  notes: '',
+                }),
+              'Sleep started',
+            )
+          }
+        >
+          Sleep
+        </button>
+        <button
+          type="button"
+          className="quick-btn awake"
+          disabled={builtInDisabled || !currentSleep}
+          onClick={() =>
+            run(
+              'awake',
+              () =>
+                api.updateSleep(child!.id, currentSleep!.id, {
+                  startedAt: currentSleep!.startedAt,
+                  endedAt: nowIso(),
+                  quality: currentSleep!.quality,
+                  nightWakings: currentSleep!.nightWakings,
+                  notes: currentSleep!.notes ?? '',
+                }),
+              'Marked awake',
+            )
+          }
+        >
+          Awake
+        </button>
+        <button
+          type="button"
+          className="quick-btn bowel"
+          disabled={builtInDisabled}
+          aria-label="Bowel movement"
+          onClick={() => {
+            setError('')
+            setBmPrompt(true)
+          }}
+        >
+          BM
+        </button>
+        {shownMeds.map((med) => (
           <button
             type="button"
             className="quick-btn add"
@@ -757,6 +815,80 @@ function QuickLogButtons({ onLogged, refreshToken = 0 }: { onLogged?: () => void
       </div>
       {!editingButtons && meds.filter((med) => med.active).length === 0 && behaviors.filter((behavior) => behavior.active).length === 0 && (
 
+            className={`quick-btn med${editingButtons ? ' editing' : ''}${med.active ? '' : ' inactive'}`}
+            style={{ background: med.buttonColor || undefined }}
+            disabled={Boolean(busy) && !editingButtons}
+            onClick={() => {
+              if (editingButtons) {
+                setError('')
+                setButtonDraft(draftFromMedication(med))
+                return
+              }
+              if (med.promptForDosage) {
+                setError('')
+                setDosePrompt(med)
+                setDoseAmount(med.dosageInstructions ?? '')
+                return
+              }
+              void run(
+                `med-${med.id}`,
+                () =>
+                  api.createDose(child!.id, {
+                    medicationId: med.id,
+                    givenAt: nowIso(),
+                    amountGiven: med.dosageInstructions || '',
+                    notes: '',
+                  }),
+                `${medicationButtonLabel(med)} logged`,
+              )
+            }}
+          >
+            {medicationButtonLabel(med)}
+          </button>
+        ))}
+        {shownBehaviors.map((behavior) => (
+          <button
+            key={`behavior-${behavior.id}`}
+            type="button"
+            className={`quick-btn med${editingButtons ? ' editing' : ''}${behavior.active ? '' : ' inactive'}`}
+            style={{ background: behavior.buttonColor || undefined }}
+            disabled={Boolean(busy) && !editingButtons}
+            onClick={() => {
+              if (editingButtons) {
+                setError('')
+                setButtonDraft(draftFromBehavior(behavior))
+                return
+              }
+              void run(
+                `behavior-${behavior.id}`,
+                () =>
+                  api.createBehaviorEvent(child!.id, {
+                    behaviorId: behavior.id,
+                    occurredAt: nowIso(),
+                    intensity: null,
+                    notes: '',
+                  }),
+                `${behaviorButtonLabel(behavior)} logged`,
+              )
+            }}
+          >
+            {behaviorButtonLabel(behavior)}
+          </button>
+        ))}
+        {editingButtons && (
+          <button
+            type="button"
+            className="quick-btn add"
+            onClick={() => {
+              setError('')
+              setButtonDraft(emptyButtonDraft('med'))
+            }}
+          >
+            + Add
+          </button>
+        )}
+      </div>
+      {!editingButtons && shownMeds.length === 0 && shownBehaviors.length === 0 && (
         <p className="muted">
           Add one-tap buttons with Edit buttons, or on the <NavLink to="/meds">Meds</NavLink> or{' '}
           <NavLink to="/behaviors">Behaviors</NavLink> pages.
