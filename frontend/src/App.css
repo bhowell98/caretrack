@@ -212,6 +212,34 @@ button.ghost {
   margin: 0.75rem 0 0.5rem;
 }
 
+.quick-slot {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.quick-slot .quick-btn {
+  width: 100%;
+}
+
+.quick-slot.dragging {
+  opacity: 0.55;
+}
+
+.quick-slot-move {
+  display: flex;
+  gap: 0.3rem;
+}
+
+.quick-slot-move button {
+  flex: 1;
+  min-height: 0;
+  padding: 0.28rem 0.4rem;
+  font-size: 1rem;
+  line-height: 1;
+}
+
 .quick-btn {
   min-height: 4.4rem;
   font-size: 1.05rem;
