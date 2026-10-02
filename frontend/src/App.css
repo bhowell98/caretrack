@@ -43,6 +43,10 @@ p {
   margin-bottom: 0;
 }
 
+.section-heading .view-switch {
+  margin: 0;
+}
+
 h1 {
   font-size: 1.8rem;
   letter-spacing: -0.03em;
@@ -206,6 +210,34 @@ button.ghost {
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 0.75rem;
   margin: 0.75rem 0 0.5rem;
+}
+
+.quick-slot {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+.quick-slot .quick-btn {
+  width: 100%;
+}
+
+.quick-slot.dragging {
+  opacity: 0.55;
+}
+
+.quick-slot-move {
+  display: flex;
+  gap: 0.3rem;
+}
+
+.quick-slot-move button {
+  flex: 1;
+  min-height: 0;
+  padding: 0.28rem 0.4rem;
+  font-size: 1rem;
+  line-height: 1;
 }
 
 .quick-btn {
@@ -511,6 +543,40 @@ button.secondary {
   align-items: flex-end;
 }
 
+.event-chart {
+  overflow-x: auto;
+  margin: 0.5rem 0 0.25rem;
+}
+
+.event-chart svg {
+  display: block;
+  max-width: none;
+}
+
+.chart-axis {
+  fill: var(--muted);
+  font-size: 10px;
+}
+
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 1rem;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.9rem;
+}
+
+.chart-swatch {
+  display: inline-block;
+  width: 0.7rem;
+  height: 0.7rem;
+  margin-right: 0.35rem;
+  border-radius: 2px;
+  vertical-align: middle;
+}
+
 @media (max-width: 700px) {
   .row {
     grid-template-columns: 1fr;
@@ -543,5 +609,17 @@ button.secondary {
   .card {
     box-shadow: none;
     break-inside: avoid;
+  }
+
+  body.print-graph-only header,
+  body.print-graph-only nav,
+  body.print-graph-only .logs-toolbar,
+  body.print-graph-only main > :not(.graph-print-target) {
+    display: none !important;
+  }
+
+  body.print-graph-only .graph-print-target {
+    box-shadow: none;
+    border: 0;
   }
 }

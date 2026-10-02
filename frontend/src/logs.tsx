@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { api, formatWhen, type Child, type LogEntry, type LogType } from './api'
 import { EditedFlag, HistoryPanel } from './history'
@@ -121,6 +121,413 @@ function toPlainText(child: Child, from: string, to: string, entries: LogEntry[]
   return lines.join('\n')
 }
 
+const TYPE_COLORS: Record<LogType, string> = {
+  SLEEP: '#355e8c',
+  BOWEL: '#8b5a3c',
+  DOSE: '#7a5c9e',
+  BEHAVIOR: '#c46b4a',
+  APPOINTMENT: '#2d6a4f',
+}
+
+function emptyCounts(): Record<LogType, number> {
+  return { SLEEP: 0, BOWEL: 0, DOSE: 0, BEHAVIOR: 0, APPOINTMENT: 0 }
+}
+
+function eachDay(from: string, to: string) {
+  const days: string[] = []
+  const cursor = new Date(`${from}T12:00:00`)
+  const end = new Date(`${to}T12:00:00`)
+  if (Number.isNaN(cursor.getTime()) || Number.isNaN(end.getTime()) || end < cursor) {
+    return [from]
+  }
+  while (cursor <= end) {
+    days.push(toDateInput(cursor))
+    cursor.setDate(cursor.getDate() + 1)
+  }
+  return days
+}
+
+function hourLabel(hour: number) {
+  return new Date(2000, 0, 1, hour).toLocaleTimeString(undefined, { hour: 'numeric' })
+}
+
+function loadImage(url: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image()
+    image.onload = () => resolve(image)
+    image.onerror = () => reject(new Error('Could not render graph'))
+    image.src = url
+  })
+}
+
+async function graphSvgToPng(
+  svg: SVGSVGElement,
+  heading: string,
+  legend: { label: string; color: string; count: number }[],
+): Promise<Blob> {
+  const clone = svg.cloneNode(true) as SVGSVGElement
+  clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg')
+  clone.querySelectorAll('line').forEach((line) => {
+    if ((line.getAttribute('stroke') || '').includes('var(')) {
+      line.setAttribute('stroke', '#ddd4c6')
+    }
+  })
+  clone.querySelectorAll('text').forEach((text) => {
+    text.setAttribute('fill', '#5c6b65')
+    text.setAttribute('font-size', '10')
+    text.setAttribute('font-family', 'system-ui, sans-serif')
+  })
+  const xml = new XMLSerializer().serializeToString(clone)
+  const url = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(xml)}`
+  const image = await loadImage(url)
+  const scale = 2
+  const pad = 20 * scale
+  const svgWidth = Math.max(svg.width.baseVal.value, 1)
+  const svgHeight = Math.max(svg.height.baseVal.value, 1)
+  const legendHeight = 36 * scale
+  const titleHeight = 28 * scale
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.max(svgWidth * scale, 640 * scale) + pad * 2
+  canvas.height = pad + titleHeight + svgHeight * scale + legendHeight + pad
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('Could not export graph')
+  ctx.fillStyle = '#fffaf3'
+  ctx.fillRect(0, 0, canvas.width, canvas.height)
+  ctx.fillStyle = '#24312c'
+  ctx.font = `600 ${16 * scale}px system-ui, sans-serif`
+  ctx.fillText(heading, pad, pad + 16 * scale)
+  ctx.drawImage(image, pad, pad + titleHeight, svgWidth * scale, svgHeight * scale)
+  ctx.font = `${12 * scale}px system-ui, sans-serif`
+  let x = pad
+  const y = pad + titleHeight + svgHeight * scale + 22 * scale
+  for (const item of legend) {
+    ctx.fillStyle = item.color
+    ctx.fillRect(x, y - 10 * scale, 10 * scale, 10 * scale)
+    ctx.fillStyle = '#24312c'
+    const label = `${item.label} (${item.count})`
+    ctx.fillText(label, x + 14 * scale, y)
+    x += ctx.measureText(label).width + 28 * scale
+  }
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => (blob ? resolve(blob) : reject(new Error('Could not export graph'))), 'image/png')
+  })
+}
+
+function EventGraph({
+  from,
+  to,
+  entries,
+  types,
+  childName,
+}: {
+  from: string
+  to: string
+  entries: LogEntry[]
+  types: LogType[]
+  childName: string
+}) {
+  const svgRef = useRef<SVGSVGElement>(null)
+  const [shareStatus, setShareStatus] = useState('')
+  const [shareError, setShareError] = useState('')
+  const singleDay = from === to
+  const [kind, setKind] = useState<'bars' | 'lines'>(() =>
+    localStorage.getItem('caretrack.logsChart') === 'lines' ? 'lines' : 'bars',
+  )
+  const buckets = useMemo(() => {
+    if (singleDay) {
+      return Array.from({ length: 24 }, (_, hour) => {
+        const counts = emptyCounts()
+        for (const entry of entries) {
+          const at = new Date(entry.at)
+          if (toDateInput(at) === from && at.getHours() === hour) {
+            counts[entry.type] += 1
+          }
+        }
+        return { key: String(hour), label: hourLabel(hour), counts }
+      })
+    }
+    return eachDay(from, to).map((day) => {
+      const counts = emptyCounts()
+      for (const entry of entries) {
+        if (toDateInput(new Date(entry.at)) === day) {
+          counts[entry.type] += 1
+        }
+      }
+      const date = new Date(`${day}T12:00:00`)
+      return {
+        key: day,
+        label: date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }),
+        counts,
+      }
+    })
+  }, [entries, from, to, singleDay])
+
+  const totals = useMemo(() => {
+    const counts = emptyCounts()
+    for (const entry of entries) {
+      counts[entry.type] += 1
+    }
+    return counts
+  }, [entries])
+
+  const visibleTypes = types.length === 0 ? ALL_TYPES : ALL_TYPES.filter((item) => types.includes(item.type))
+  const stackedMax = Math.max(
+    1,
+    ...buckets.map((bucket) => visibleTypes.reduce((sum, item) => sum + bucket.counts[item.type], 0)),
+  )
+  const lineMax = Math.max(
+    1,
+    ...buckets.flatMap((bucket) => visibleTypes.map((item) => bucket.counts[item.type])),
+  )
+  const max = kind === 'lines' ? lineMax : stackedMax
+  const chartHeight = 160
+  const chartLeft = 28
+  const barGap = 6
+  const barWidth = singleDay ? 18 : Math.max(18, Math.min(36, Math.floor(420 / Math.max(buckets.length, 1))))
+  const chartWidth = chartLeft + buckets.length * (barWidth + barGap) + barGap
+  const title = `${kind === 'lines' ? 'Line' : 'Bar'} chart of ${
+    singleDay
+      ? `events by hour on ${new Date(`${from}T12:00:00`).toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric' })}`
+      : `events by day from ${from} to ${to}`
+  }`
+
+  function setChartKind(next: 'bars' | 'lines') {
+    setKind(next)
+    localStorage.setItem('caretrack.logsChart', next)
+  }
+
+  function xFor(index: number) {
+    return chartLeft + barGap + index * (barWidth + barGap) + barWidth / 2
+  }
+
+  function yFor(count: number) {
+    return 8 + chartHeight - (count / max) * chartHeight
+  }
+
+  function showTick(index: number) {
+    return singleDay ? index % 3 === 0 : buckets.length <= 14 || index % Math.ceil(buckets.length / 10) === 0
+  }
+
+  const rangeLabel = from === to ? from : `${from} to ${to}`
+  const shareHeading = `${childName} · ${rangeLabel}`
+  const legendItems = visibleTypes.map((item) => ({
+    label: item.label,
+    color: TYPE_COLORS[item.type],
+    count: totals[item.type],
+  }))
+
+  async function pngBlob() {
+    const svg = svgRef.current
+    if (!svg) throw new Error('Graph is not ready')
+    return graphSvgToPng(svg, `${shareHeading} · ${kind === 'lines' ? 'line' : 'bar'} chart`, legendItems)
+  }
+
+  function fileName() {
+    return `caretrack-graph-${childName.replaceAll(/\s+/g, '-').toLowerCase()}-${from}-to-${to}.png`
+  }
+
+  function printGraph() {
+    setShareError('')
+    setShareStatus('Print dialog opened.')
+    document.body.classList.add('print-graph-only')
+    const cleanup = () => {
+      document.body.classList.remove('print-graph-only')
+      window.removeEventListener('afterprint', cleanup)
+    }
+    window.addEventListener('afterprint', cleanup)
+    window.print()
+  }
+
+  async function shareGraph() {
+    setShareError('')
+    setShareStatus('')
+    try {
+      const blob = await pngBlob()
+      const file = new File([blob], fileName(), { type: 'image/png' })
+      const text = `${shareHeading}\n${title}`
+      if (navigator.share && navigator.canShare?.({ files: [file] })) {
+        await navigator.share({ title: shareHeading, text, files: [file] })
+        setShareStatus('Share sheet opened.')
+        return
+      }
+      if (navigator.share) {
+        await navigator.share({ title: shareHeading, text })
+        setShareStatus('Share sheet opened.')
+        return
+      }
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = fileName()
+      link.click()
+      URL.revokeObjectURL(url)
+      setShareStatus('Graph image downloaded.')
+    } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') return
+      setShareError(err instanceof Error ? err.message : 'Could not share graph')
+    }
+  }
+
+  if (entries.length === 0) {
+    return (
+      <section className="card">
+        <h2>Activity graph</h2>
+        <p className="muted">No events in this range to graph.</p>
+      </section>
+    )
+  }
+
+  return (
+    <section className="card graph-print-target">
+      <div className="section-heading">
+        <h2>Activity graph</h2>
+        <div className="view-switch no-print" role="group" aria-label="Chart type">
+          <button
+            type="button"
+            className={kind === 'bars' ? 'selected' : 'secondary'}
+            aria-pressed={kind === 'bars'}
+            onClick={() => setChartKind('bars')}
+          >
+            Bars
+          </button>
+          <button
+            type="button"
+            className={kind === 'lines' ? 'selected' : 'secondary'}
+            aria-pressed={kind === 'lines'}
+            onClick={() => setChartKind('lines')}
+          >
+            Lines
+          </button>
+        </div>
+      </div>
+      <p className="muted">
+        {kind === 'lines'
+          ? singleDay
+            ? 'One line per event type, by hour for the selected day.'
+            : 'One line per event type, by day for the selected range.'
+          : singleDay
+            ? 'Counts by hour for the selected day.'
+            : 'Counts by day for the selected range.'}
+      </p>
+      <div className="event-chart">
+        <svg
+          ref={svgRef}
+          role="img"
+          aria-label={title}
+          viewBox={`0 0 ${chartWidth} ${chartHeight + 36}`}
+          width={chartWidth}
+          height={chartHeight + 36}
+        >
+          <title>{title}</title>
+          {[0, 0.5, 1].map((fraction) => {
+            const value = Math.round(max * (1 - fraction))
+            const y = 8 + chartHeight * fraction
+            return (
+              <g key={fraction}>
+                <line x1={chartLeft} x2={chartWidth - 4} y1={y} y2={y} stroke="var(--line)" />
+                <text x={chartLeft - 6} y={y + 4} textAnchor="end" className="chart-axis">
+                  {value}
+                </text>
+              </g>
+            )
+          })}
+          {kind === 'bars' &&
+            buckets.map((bucket, index) => {
+              const x = chartLeft + barGap + index * (barWidth + barGap)
+              let y = 8 + chartHeight
+              return (
+                <g key={bucket.key}>
+                  {visibleTypes.map((item) => {
+                    const count = bucket.counts[item.type]
+                    if (count === 0) return null
+                    const height = (count / max) * chartHeight
+                    y -= height
+                    return (
+                      <rect
+                        key={item.type}
+                        x={x}
+                        y={y}
+                        width={barWidth}
+                        height={height}
+                        fill={TYPE_COLORS[item.type]}
+                      >
+                        <title>{`${bucket.label}: ${count} ${item.label}`}</title>
+                      </rect>
+                    )
+                  })}
+                  {showTick(index) && (
+                    <text x={x + barWidth / 2} y={chartHeight + 24} textAnchor="middle" className="chart-axis">
+                      {bucket.label}
+                    </text>
+                  )}
+                </g>
+              )
+            })}
+          {kind === 'lines' &&
+            visibleTypes.map((item) => {
+              const points = buckets.map((bucket, index) => `${xFor(index)},${yFor(bucket.counts[item.type])}`).join(' ')
+              return (
+                <g key={item.type}>
+                  <polyline
+                    points={points}
+                    fill="none"
+                    stroke={TYPE_COLORS[item.type]}
+                    strokeWidth="2.5"
+                    strokeLinejoin="round"
+                    strokeLinecap="round"
+                  />
+                  {buckets.map((bucket, index) => (
+                    <circle
+                      key={bucket.key}
+                      cx={xFor(index)}
+                      cy={yFor(bucket.counts[item.type])}
+                      r="3.2"
+                      fill={TYPE_COLORS[item.type]}
+                    >
+                      <title>{`${bucket.label}: ${bucket.counts[item.type]} ${item.label}`}</title>
+                    </circle>
+                  ))}
+                </g>
+              )
+            })}
+          {kind === 'lines' &&
+            buckets.map((bucket, index) =>
+              showTick(index) ? (
+                <text
+                  key={bucket.key}
+                  x={xFor(index)}
+                  y={chartHeight + 24}
+                  textAnchor="middle"
+                  className="chart-axis"
+                >
+                  {bucket.label}
+                </text>
+              ) : null,
+            )}
+        </svg>
+      </div>
+      <ul className="chart-legend">
+        {visibleTypes.map((item) => (
+          <li key={item.type}>
+            <span className="chart-swatch" style={{ background: TYPE_COLORS[item.type] }} />
+            {item.label} ({totals[item.type]})
+          </li>
+        ))}
+      </ul>
+      <div className="row-actions no-print">
+        <button type="button" className="secondary" onClick={() => void shareGraph()}>
+          Share graph
+        </button>
+        <button type="button" className="secondary" onClick={printGraph}>
+          Print graph
+        </button>
+      </div>
+      {shareError && <p className="error no-print">{shareError}</p>}
+      {shareStatus && !shareError && <p className="status no-print">{shareStatus}</p>}
+    </section>
+  )
+}
+
 function groupByDay(entries: LogEntry[]) {
   const groups: { label: string; key: string; items: LogEntry[] }[] = []
   for (const entry of entries) {
@@ -234,7 +641,7 @@ export function LogsPage() {
   return (
     <>
       <h1>Daily logs</h1>
-      <p className="muted">Search, review, export, or send sleep, bowel, medication, behavior, and appointment history.</p>
+      <p className="muted">Search, graph, export, or send sleep, bowel, medication, behavior, and appointment history.</p>
       {error && <p className="error">{error}</p>}
       {status && !error && <p className="status">{status}</p>}
 
@@ -248,6 +655,30 @@ export function LogsPage() {
             <span>To</span>
             <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
           </label>
+        </div>
+        <div className="row-actions">
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => {
+              const today = toDateInput(new Date())
+              setFrom(today)
+              setTo(today)
+            }}
+          >
+            Today
+          </button>
+          <button
+            type="button"
+            className="secondary"
+            onClick={() => {
+              const range = defaultRange()
+              setFrom(range.from)
+              setTo(range.to)
+            }}
+          >
+            Last 7 days
+          </button>
         </div>
         <label className="field">
           <span>Search</span>
@@ -305,6 +736,8 @@ export function LogsPage() {
           </button>
         </div>
       </section>
+
+      <EventGraph from={from} to={to} entries={entries} types={types} childName={child.name} />
 
       <p className="muted">
         {entries.length} {entries.length === 1 ? 'entry' : 'entries'}

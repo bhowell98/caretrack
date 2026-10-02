@@ -13,6 +13,7 @@ export type Child = {
   notes: string | null
   role: ChildRole
   ownerName: string | null
+  quickButtonLayout: string[]
 }
 
 export type ChildShare = {
@@ -180,6 +181,11 @@ export const api = {
     request<Child>('/api/children', { method: 'POST', body: JSON.stringify(body) }),
   updateChild: (id: number, body: { name: string; dateOfBirth?: string; notes?: string }) =>
     request<Child>(`/api/children/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  updateQuickButtonLayout: (childId: number, keys: string[]) =>
+    request<Child>(`/api/children/${childId}/quick-button-layout`, {
+      method: 'PUT',
+      body: JSON.stringify({ keys }),
+    }),
   shares: (childId: number) => request<ChildShare[]>(`/api/children/${childId}/shares`),
   inviteShare: (childId: number, email: string) =>
     request<ChildShare>(`/api/children/${childId}/shares`, {

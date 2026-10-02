@@ -32,6 +32,9 @@ public class Child {
     @Column(length = 2000)
     private String notes;
 
+    @Column(length = 4000)
+    private String quickButtonLayout;
+
     public Long getId() {
         return id;
     }
@@ -66,5 +69,13 @@ public class Child {
 
     public void setNotes(String notes) {
         this.notes = notes;
+    }
+
+    public String getQuickButtonLayout() {
+        return quickButtonLayout;
+    }
+
+    public void setQuickButtonLayout(String quickButtonLayout) {
+        this.quickButtonLayout = quickButtonLayout;
     }
 }

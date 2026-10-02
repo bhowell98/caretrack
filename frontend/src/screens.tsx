@@ -269,6 +269,79 @@ function draftFromBehavior(behavior: Behavior): QuickButtonDraft {
   }
 }
 
+function mergeButtonLayout(stored: string[] | undefined, meds: Medication[], behaviors: Behavior[]) {
+  const allowed = [
+    'sleep',
+    'awake',
+    'bowel',
+    ...meds.map((med) => `med:${med.id}`),
+    ...behaviors.map((behavior) => `behavior:${behavior.id}`),
+  ]
+  const allowedSet = new Set(allowed)
+  const next: string[] = []
+  for (const key of stored ?? []) {
+    if (allowedSet.has(key) && !next.includes(key)) {
+      next.push(key)
+    }
+  }
+  for (const key of allowed) {
+    if (!next.includes(key)) {
+      next.push(key)
+    }
+  }
+  return next
+}
+
+function QuickSlot({
+  editing,
+  dragging,
+  canMoveLeft,
+  canMoveRight,
+  onMove,
+  onDragStart,
+  onDrop,
+  onDragEnd,
+  children,
+}: {
+  editing: boolean
+  dragging: boolean
+  canMoveLeft: boolean
+  canMoveRight: boolean
+  onMove: (delta: number) => void
+  onDragStart: () => void
+  onDrop: () => void
+  onDragEnd: () => void
+  children: ReactNode
+}) {
+  return (
+    <div
+      className={`quick-slot${editing ? ' arranging' : ''}${dragging ? ' dragging' : ''}`}
+      draggable={editing}
+      onDragStart={onDragStart}
+      onDragOver={(event) => {
+        if (editing) event.preventDefault()
+      }}
+      onDrop={(event) => {
+        event.preventDefault()
+        onDrop()
+      }}
+      onDragEnd={onDragEnd}
+    >
+      {children}
+      {editing && (
+        <div className="quick-slot-move">
+          <button type="button" className="secondary" disabled={!canMoveLeft} aria-label="Move earlier" onClick={() => onMove(-1)}>
+            ‹
+          </button>
+          <button type="button" className="secondary" disabled={!canMoveRight} aria-label="Move later" onClick={() => onMove(1)}>
+            ›
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function ColorSwatches({
   value,
   onChange,
@@ -320,7 +393,7 @@ function Switch({
 }
 
 function QuickLogButtons({ onLogged, refreshToken = 0 }: { onLogged?: () => void; refreshToken?: number }) {
-  const { child } = useAuth()
+  const { child, refreshChildren } = useAuth()
   const [sleeps, setSleeps] = useState<SleepInterval[]>([])
   const [meds, setMeds] = useState<Medication[]>([])
   const [behaviors, setBehaviors] = useState<Behavior[]>([])
@@ -332,6 +405,7 @@ function QuickLogButtons({ onLogged, refreshToken = 0 }: { onLogged?: () => void
   const [doseAmount, setDoseAmount] = useState('')
   const [editingButtons, setEditingButtons] = useState(false)
   const [buttonDraft, setButtonDraft] = useState<QuickButtonDraft | null>(null)
+  const [dragKey, setDragKey] = useState<string | null>(null)
 
   async function reload() {
     if (!child) return
@@ -350,6 +424,18 @@ function QuickLogButtons({ onLogged, refreshToken = 0 }: { onLogged?: () => void
   }, [child, refreshToken])
 
   const currentSleep = sleeps.find((row) => !row.endedAt) ?? null
+  const layoutKeys = mergeButtonLayout(child?.quickButtonLayout, meds, behaviors)
+  const visibleKeys = editingButtons
+    ? layoutKeys
+    : layoutKeys.filter((key) => {
+        if (key.startsWith('med:')) {
+          return meds.find((med) => med.id === Number(key.slice(4)))?.active
+        }
+        if (key.startsWith('behavior:')) {
+          return behaviors.find((behavior) => behavior.id === Number(key.slice(9)))?.active
+        }
+        return true
+      })
   const shownMeds = editingButtons ? meds : meds.filter((med) => med.active)
   const shownBehaviors = editingButtons ? behaviors : behaviors.filter((behavior) => behavior.active)
   const builtInDisabled = Boolean(busy) || editingButtons
@@ -411,6 +497,7 @@ function QuickLogButtons({ onLogged, refreshToken = 0 }: { onLogged?: () => void
       }
       setButtonDraft(null)
       await reload()
+      await refreshChildren()
       onLogged?.()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save button')
@@ -432,12 +519,47 @@ function QuickLogButtons({ onLogged, refreshToken = 0 }: { onLogged?: () => void
       setButtonDraft(null)
       setStatus('Button deleted')
       await reload()
+      await refreshChildren()
       onLogged?.()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not delete button')
     } finally {
       setBusy(null)
     }
+  }
+
+  async function persistLayout(next: string[]) {
+    if (!child) return
+    setError('')
+    try {
+      await api.updateQuickButtonLayout(child.id, next)
+      await refreshChildren()
+      setStatus('Button order saved')
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save button order')
+    }
+  }
+
+  async function moveKey(key: string, delta: number) {
+    const index = layoutKeys.indexOf(key)
+    const target = index + delta
+    if (index < 0 || target < 0 || target >= layoutKeys.length) return
+    const next = [...layoutKeys]
+    const [item] = next.splice(index, 1)
+    next.splice(target, 0, item)
+    await persistLayout(next)
+  }
+
+  function dropOn(targetKey: string) {
+    if (!dragKey || dragKey === targetKey) return
+    const from = layoutKeys.indexOf(dragKey)
+    const to = layoutKeys.indexOf(targetKey)
+    if (from < 0 || to < 0) return
+    const next = [...layoutKeys]
+    const [item] = next.splice(from, 1)
+    next.splice(to, 0, item)
+    setDragKey(null)
+    void persistLayout(next)
   }
 
   return (
@@ -461,12 +583,169 @@ function QuickLogButtons({ onLogged, refreshToken = 0 }: { onLogged?: () => void
       </div>
       <p className="muted">
         {editingButtons
+          ? 'Drag a button or use the arrows to change order. Tap a medication or behavior button to edit it. Sleep, Awake, and BM stay built-in.'
           ? 'Tap a medication or behavior button to change its name, label, or color. Sleep, Awake, and BM stay as they are.'
           : currentSleep
             ? `Sleeping since ${formatWhen(currentSleep.startedAt)}.`
             : 'Tap Sleep, Awake, BM, or a medication or behavior button to log now.'}
       </p>
       <div className="quick-grid">
+        {visibleKeys.map((key) => {
+          const index = layoutKeys.indexOf(key)
+          const wrap = (button: ReactNode) => (
+            <QuickSlot
+              key={key}
+              editing={editingButtons}
+              dragging={dragKey === key}
+              canMoveLeft={index > 0}
+              canMoveRight={index >= 0 && index < layoutKeys.length - 1}
+              onMove={(delta) => void moveKey(key, delta)}
+              onDragStart={() => setDragKey(key)}
+              onDrop={() => dropOn(key)}
+              onDragEnd={() => setDragKey(null)}
+            >
+              {button}
+            </QuickSlot>
+          )
+          if (key === 'sleep') {
+            return wrap(
+              <button
+                type="button"
+                className="quick-btn sleep"
+                disabled={builtInDisabled || Boolean(currentSleep)}
+                onClick={() =>
+                  run(
+                    'sleep',
+                    () =>
+                      api.createSleep(child!.id, {
+                        startedAt: nowIso(),
+                        endedAt: null,
+                        quality: 'UNKNOWN',
+                        nightWakings: null,
+                        notes: '',
+                      }),
+                    'Sleep started',
+                  )
+                }
+              >
+                Sleep
+              </button>,
+            )
+          }
+          if (key === 'awake') {
+            return wrap(
+              <button
+                type="button"
+                className="quick-btn awake"
+                disabled={builtInDisabled || !currentSleep}
+                onClick={() =>
+                  run(
+                    'awake',
+                    () =>
+                      api.updateSleep(child!.id, currentSleep!.id, {
+                        startedAt: currentSleep!.startedAt,
+                        endedAt: nowIso(),
+                        quality: currentSleep!.quality,
+                        nightWakings: currentSleep!.nightWakings,
+                        notes: currentSleep!.notes ?? '',
+                      }),
+                    'Marked awake',
+                  )
+                }
+              >
+                Awake
+              </button>,
+            )
+          }
+          if (key === 'bowel') {
+            return wrap(
+              <button
+                type="button"
+                className="quick-btn bowel"
+                disabled={builtInDisabled}
+                aria-label="Bowel movement"
+                onClick={() => {
+                  setError('')
+                  setBmPrompt(true)
+                }}
+              >
+                BM
+              </button>,
+            )
+          }
+          if (key.startsWith('med:')) {
+            const med = meds.find((row) => row.id === Number(key.slice(4)))
+            if (!med) return null
+            return wrap(
+              <button
+                type="button"
+                className={`quick-btn med${editingButtons ? ' editing' : ''}${med.active ? '' : ' inactive'}`}
+                style={{ background: med.buttonColor || undefined }}
+                disabled={Boolean(busy) && !editingButtons}
+                onClick={() => {
+                  if (editingButtons) {
+                    setError('')
+                    setButtonDraft(draftFromMedication(med))
+                    return
+                  }
+                  if (med.promptForDosage) {
+                    setError('')
+                    setDosePrompt(med)
+                    setDoseAmount(med.dosageInstructions ?? '')
+                    return
+                  }
+                  void run(
+                    `med-${med.id}`,
+                    () =>
+                      api.createDose(child!.id, {
+                        medicationId: med.id,
+                        givenAt: nowIso(),
+                        amountGiven: med.dosageInstructions || '',
+                        notes: '',
+                      }),
+                    `${medicationButtonLabel(med)} logged`,
+                  )
+                }}
+              >
+                {medicationButtonLabel(med)}
+              </button>,
+            )
+          }
+          if (key.startsWith('behavior:')) {
+            const behavior = behaviors.find((row) => row.id === Number(key.slice(9)))
+            if (!behavior) return null
+            return wrap(
+              <button
+                type="button"
+                className={`quick-btn med${editingButtons ? ' editing' : ''}${behavior.active ? '' : ' inactive'}`}
+                style={{ background: behavior.buttonColor || undefined }}
+                disabled={Boolean(busy) && !editingButtons}
+                onClick={() => {
+                  if (editingButtons) {
+                    setError('')
+                    setButtonDraft(draftFromBehavior(behavior))
+                    return
+                  }
+                  void run(
+                    `behavior-${behavior.id}`,
+                    () =>
+                      api.createBehaviorEvent(child!.id, {
+                        behaviorId: behavior.id,
+                        occurredAt: nowIso(),
+                        intensity: null,
+                        notes: '',
+                      }),
+                    `${behaviorButtonLabel(behavior)} logged`,
+                  )
+                }}
+              >
+                {behaviorButtonLabel(behavior)}
+              </button>,
+            )
+          }
+          return null
+        })}
+        {editingButtons && (
         <button
           type="button"
           className="quick-btn sleep"
@@ -523,8 +802,19 @@ function QuickLogButtons({ onLogged, refreshToken = 0 }: { onLogged?: () => void
         </button>
         {shownMeds.map((med) => (
           <button
-            key={med.id}
             type="button"
+            className="quick-btn add"
+            onClick={() => {
+              setError('')
+              setButtonDraft(emptyButtonDraft('med'))
+            }}
+          >
+            + Add
+          </button>
+        )}
+      </div>
+      {!editingButtons && meds.filter((med) => med.active).length === 0 && behaviors.filter((behavior) => behavior.active).length === 0 && (
+
             className={`quick-btn med${editingButtons ? ' editing' : ''}${med.active ? '' : ' inactive'}`}
             style={{ background: med.buttonColor || undefined }}
             disabled={Boolean(busy) && !editingButtons}

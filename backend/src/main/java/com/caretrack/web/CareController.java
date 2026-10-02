@@ -20,6 +20,7 @@ import com.caretrack.web.dto.ApiDtos.DoseResponse;
 import com.caretrack.web.dto.ApiDtos.LogEntryResponse;
 import com.caretrack.web.dto.ApiDtos.MedicationRequest;
 import com.caretrack.web.dto.ApiDtos.MedicationResponse;
+import com.caretrack.web.dto.ApiDtos.QuickButtonLayoutRequest;
 import com.caretrack.web.dto.ApiDtos.ShareRequest;
 import com.caretrack.web.dto.ApiDtos.ShareResponse;
 import com.caretrack.web.dto.ApiDtos.SleepRequest;
@@ -66,6 +67,14 @@ public class CareController {
     @PutMapping("/{childId}")
     public ChildResponse updateChild(@PathVariable Long childId, @Valid @RequestBody ChildRequest request) {
         return careService.updateChild(user(), childId, request);
+    }
+
+    @PutMapping("/{childId}/quick-button-layout")
+    public ChildResponse updateQuickButtonLayout(
+            @PathVariable Long childId,
+            @Valid @RequestBody QuickButtonLayoutRequest request
+    ) {
+        return careService.updateQuickButtonLayout(user(), childId, request);
     }
 
     @GetMapping("/{childId}/shares")

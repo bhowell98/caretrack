@@ -42,6 +42,7 @@ import com.caretrack.web.dto.ApiDtos.MedicationRequest;
 import com.caretrack.web.dto.ApiDtos.MedicationResponse;
 import com.caretrack.web.dto.ApiDtos.ShareRequest;
 import com.caretrack.web.dto.ApiDtos.ShareResponse;
+import com.caretrack.web.dto.ApiDtos.QuickButtonLayoutRequest;
 import com.caretrack.web.dto.ApiDtos.SleepRequest;
 import com.caretrack.web.dto.ApiDtos.SleepResponse;
 import org.springframework.stereotype.Service;
@@ -53,6 +54,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -138,6 +140,13 @@ public class CareService {
         child.setName(request.name().trim());
         child.setDateOfBirth(request.dateOfBirth());
         child.setNotes(request.notes());
+        return toChildResponse(user, child);
+    }
+
+    @Transactional
+    public ChildResponse updateQuickButtonLayout(AppUser user, Long childId, QuickButtonLayoutRequest request) {
+        Child child = requireChild(user, childId);
+        child.setQuickButtonLayout(writeLayout(normalizeLayout(childId, request.keys())));
         return toChildResponse(user, child);
     }
 
@@ -362,7 +371,9 @@ public class CareService {
         Medication medication = new Medication();
         medication.setChild(child);
         applyMedication(medication, request);
-        return MedicationResponse.from(medications.save(medication));
+        Medication saved = medications.save(medication);
+        appendLayoutKey(child, "med:" + saved.getId());
+        return MedicationResponse.from(saved);
     }
 
     @Transactional
@@ -381,6 +392,7 @@ public class CareService {
                 .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Medication not found"));
         doses.deleteByMedicationId(medication.getId());
         medications.delete(medication);
+        removeLayoutKey(requireChild(user, childId), "med:" + medicationId);
     }
 
     public List<BehaviorResponse> listBehaviors(AppUser user, Long childId) {
@@ -394,7 +406,9 @@ public class CareService {
         Behavior behavior = new Behavior();
         behavior.setChild(child);
         applyBehavior(behavior, request);
-        return BehaviorResponse.from(behaviors.save(behavior));
+        Behavior saved = behaviors.save(behavior);
+        appendLayoutKey(child, "behavior:" + saved.getId());
+        return BehaviorResponse.from(saved);
     }
 
     @Transactional
@@ -413,6 +427,7 @@ public class CareService {
                 .orElseThrow(() -> new ResponseStatusException(NOT_FOUND, "Behavior not found"));
         behaviorEvents.deleteByBehaviorId(behavior.getId());
         behaviors.delete(behavior);
+        removeLayoutKey(requireChild(user, childId), "behavior:" + behaviorId);
     }
 
     @Transactional(readOnly = true)
@@ -658,7 +673,82 @@ public class CareService {
     }
 
     private ChildResponse toChildResponse(AppUser user, Child child) {
-        return ChildResponse.from(child, isOwner(user, child) ? "OWNER" : "SHARED");
+        return ChildResponse.from(child, isOwner(user, child) ? "OWNER" : "SHARED", normalizeLayout(child.getId(), readLayout(child.getQuickButtonLayout())));
+    }
+
+    private List<String> allowedLayoutKeys(Long childId) {
+        LinkedHashSet<String> keys = new LinkedHashSet<>();
+        keys.add("sleep");
+        keys.add("awake");
+        keys.add("bowel");
+        medications.findByChildIdOrderByNameAsc(childId).forEach(medication -> keys.add("med:" + medication.getId()));
+        behaviors.findByChildIdOrderByNameAsc(childId).forEach(behavior -> keys.add("behavior:" + behavior.getId()));
+        return List.copyOf(keys);
+    }
+
+    private List<String> normalizeLayout(Long childId, List<String> requested) {
+        LinkedHashSet<String> allowed = new LinkedHashSet<>(allowedLayoutKeys(childId));
+        LinkedHashSet<String> ordered = new LinkedHashSet<>();
+        if (requested != null) {
+            for (String key : requested) {
+                if (key != null && allowed.contains(key)) {
+                    ordered.add(key);
+                }
+            }
+        }
+        ordered.addAll(allowed);
+        return List.copyOf(ordered);
+    }
+
+    private List<String> readLayout(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return List.of();
+        }
+        String trimmed = raw.trim();
+        if (trimmed.startsWith("[")) {
+            String inner = trimmed.substring(1, trimmed.endsWith("]") ? trimmed.length() - 1 : trimmed.length()).trim();
+            if (inner.isEmpty()) {
+                return List.of();
+            }
+            List<String> keys = new ArrayList<>();
+            for (String part : inner.split(",")) {
+                String key = part.trim();
+                if (key.startsWith("\"") && key.endsWith("\"") && key.length() >= 2) {
+                    key = key.substring(1, key.length() - 1);
+                }
+                if (!key.isBlank()) {
+                    keys.add(key);
+                }
+            }
+            return keys;
+        }
+        return List.of(trimmed.split("\\R"));
+    }
+
+    private String writeLayout(List<String> keys) {
+        StringBuilder json = new StringBuilder("[");
+        for (int i = 0; i < keys.size(); i++) {
+            if (i > 0) {
+                json.append(',');
+            }
+            json.append('"').append(keys.get(i).replace("\\", "").replace("\"", "")).append('"');
+        }
+        json.append(']');
+        return json.toString();
+    }
+
+    private void appendLayoutKey(Child child, String key) {
+        List<String> next = new ArrayList<>(normalizeLayout(child.getId(), readLayout(child.getQuickButtonLayout())));
+        if (!next.contains(key)) {
+            next.add(key);
+        }
+        child.setQuickButtonLayout(writeLayout(next));
+    }
+
+    private void removeLayoutKey(Child child, String key) {
+        List<String> next = new ArrayList<>(readLayout(child.getQuickButtonLayout()));
+        next.remove(key);
+        child.setQuickButtonLayout(writeLayout(normalizeLayout(child.getId(), next)));
     }
 
     private ChildShare grantShare(Child child, AppUser user, ChildShare.Role role) {

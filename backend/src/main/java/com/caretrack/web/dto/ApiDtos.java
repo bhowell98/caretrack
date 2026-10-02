@@ -17,6 +17,7 @@ import jakarta.validation.constraints.Size;
 
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.List;
 
 public final class ApiDtos {
     private ApiDtos() {
@@ -51,16 +52,32 @@ public final class ApiDtos {
             LocalDate dateOfBirth,
             String notes,
             String role,
-            String ownerName
+            String ownerName,
+            List<String> quickButtonLayout
     ) {
         public static ChildResponse from(Child child) {
-            return from(child, "OWNER");
+            return from(child, "OWNER", List.of());
         }
 
         public static ChildResponse from(Child child, String role) {
-            String ownerName = child.getCaregiver() == null ? null : child.getCaregiver().getDisplayName();
-            return new ChildResponse(child.getId(), child.getName(), child.getDateOfBirth(), child.getNotes(), role, ownerName);
+            return from(child, role, List.of());
         }
+
+        public static ChildResponse from(Child child, String role, List<String> quickButtonLayout) {
+            String ownerName = child.getCaregiver() == null ? null : child.getCaregiver().getDisplayName();
+            return new ChildResponse(
+                    child.getId(),
+                    child.getName(),
+                    child.getDateOfBirth(),
+                    child.getNotes(),
+                    role,
+                    ownerName,
+                    quickButtonLayout == null ? List.of() : quickButtonLayout
+            );
+        }
+    }
+
+    public record QuickButtonLayoutRequest(@NotNull List<String> keys) {
     }
 
     public record ShareRequest(@Email @NotBlank String email) {
