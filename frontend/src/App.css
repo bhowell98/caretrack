@@ -43,6 +43,10 @@ p {
   margin-bottom: 0;
 }
 
+.section-heading .view-switch {
+  margin: 0;
+}
+
 h1 {
   font-size: 1.8rem;
   letter-spacing: -0.03em;
@@ -509,6 +513,40 @@ button.secondary {
 .log-item .row-actions {
   flex-direction: column;
   align-items: flex-end;
+}
+
+.event-chart {
+  overflow-x: auto;
+  margin: 0.5rem 0 0.25rem;
+}
+
+.event-chart svg {
+  display: block;
+  max-width: none;
+}
+
+.chart-axis {
+  fill: var(--muted);
+  font-size: 10px;
+}
+
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 1rem;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 0.9rem;
+}
+
+.chart-swatch {
+  display: inline-block;
+  width: 0.7rem;
+  height: 0.7rem;
+  margin-right: 0.35rem;
+  border-radius: 2px;
+  vertical-align: middle;
 }
 
 @media (max-width: 700px) {
